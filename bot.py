@@ -47,6 +47,20 @@ async def save_guild_config(guild_id, honeypot_channel_id=None, log_channel_id=N
     """, guild_id, honeypot_channel_id, log_channel_id, ban_reason)
     await conn.close()
 
+async def get_honeypot_channel(guild):
+    config = await get_guild_config(guild.id)
+    channel_id = config.get("honeypot_channel_id")
+    if channel_id:
+        return guild.get_channel(channel_id)
+    return None
+
+async def get_log_channel(guild):
+    config = await get_guild_config(guild.id)
+    channel_id = config.get("log_channel_id")
+    if channel_id:
+        return guild.get_channel(channel_id)
+    return None
+
 # static config use , integrated with asyncpg functions for future migration    (remove if cause errors)
 # def load_config():
 #     try:
@@ -146,7 +160,7 @@ def analyze_roles(member):
     return indicators
 
 
-async def detect_suspicious_indicators(user, member):
+def detect_suspicious_indicators(user, member):
     indicators = []
     now = datetime.now(timezone.utc)
     account_age = now - user.created_at
@@ -250,7 +264,7 @@ async def handle_honeypot_trigger(message):
         member = message.guild.get_member(message.author.id)
         if not member:
             return
-        indicators = await detect_suspicious_indicators(message.author, member)
+        indicators = detect_suspicious_indicators(message.author, member)
         print(
             f"Honeypot triggered by {message.author} (ID: {message.author.id})"
         )
@@ -284,169 +298,180 @@ async def on_message(message):
         await handle_honeypot_trigger(message)
         return
 
-    if message.content.startswith('!sethoneypot'):
-        if not is_admin(message.author, message.guild):
-            await message.channel.send("You need administrator permissions.")
-            return
-        parts = message.content.split()
-        if len(parts) < 2:
-            await message.channel.send("Usage: `!sethoneypot <channel_id>`")
-            return
-        try:
-            channel_id = int(parts[1])
-            channel = message.guild.get_channel(channel_id)
-            if not channel:
-                await message.channel.send("Channel not found.")
-                return
-            guild_config = get_guild_config(message.guild.id)
-            guild_config["honeypot_channel_id"] = channel_id
-            save_guild_config(message.guild.id, guild_config)
-            await message.channel.send(
-                f"Honeypot channel set to {channel.mention}")
-        except ValueError:
-            await message.channel.send("Invalid channel ID.")
-        return
+    # Command dispatcher
+    commands = {
+        '!sethoneypot': handle_sethoneypot,
+        '!setlog': handle_setlog,
+        '!createhoneypot': handle_createhoneypot,
+        '!createlog': handle_createlog,
+        '!honeypotconfig': handle_honeypotconfig,
+        '!honeypothelp': handle_honeypothelp,
+        '!honeypotstats': handle_honeypotstats,
+    }
 
-    if message.content.startswith('!setlog'):
-        if not is_admin(message.author, message.guild):
-            await message.channel.send("You need administrator permissions.")
+    for cmd, handler in commands.items():
+        if message.content.startswith(cmd):
+            await handler(message)
             return
-        parts = message.content.split()
-        if len(parts) < 2:
-            await message.channel.send("Usage: `!setlog <channel_id>`")
-            return
-        try:
-            channel_id = int(parts[1])
-            channel = message.guild.get_channel(channel_id)
-            if not channel:
-                await message.channel.send("Channel not found.")
-                return
-            guild_config = get_guild_config(message.guild.id)
-            guild_config["log_channel_id"] = channel_id
-            save_guild_config(message.guild.id, guild_config)
-            await message.channel.send(f"Log channel set to {channel.mention}")
-        except ValueError:
-            await message.channel.send("Invalid channel ID.")
-        return
 
-    if message.content.startswith('!createhoneypot'):
-        if not is_admin(message.author, message.guild):
-            await message.channel.send("You need administrator permissions.")
-            return
-        parts = message.content.split(maxsplit=1)
-        name = parts[1] if len(parts) > 1 else "🪤-honeypot"
-        try:
-            channel = await message.guild.create_text_channel(
-                name,
-                reason="Honeypot channel created by bot",
-                topic="This channel is monitored. Do not message here.")
-            guild_config = get_guild_config(message.guild.id)
-            guild_config["honeypot_channel_id"] = channel.id
-            save_guild_config(message.guild.id, guild_config)
-            await message.channel.send(
-                f"Created honeypot channel: {channel.mention}\nChannel ID: `{channel.id}`"
-            )
-        except Exception as e:
-            await message.channel.send(f"Error creating channel: {e}")
-        return
+# Helper functions for each command
 
-    if message.content.startswith('!createlog'):
-        if not is_admin(message.author, message.guild):
-            await message.channel.send("You need administrator permissions.")
-            return
-        parts = message.content.split(maxsplit=1)
-        name = parts[1] if len(parts) > 1 else "🔍-honeypot-logs"
-        try:
-            channel = await message.guild.create_text_channel(
-                name, reason="Log channel created by bot")
-            await channel.set_permissions(message.guild.default_role,
-                                          read_messages=False)
-            guild_config = get_guild_config(message.guild.id)
-            guild_config["log_channel_id"] = channel.id
-            save_guild_config(message.guild.id, guild_config)
-            await message.channel.send(
-                f"Created log channel: {channel.mention}\nChannel ID: `{channel.id}`"
-            )
-        except Exception as e:
-            await message.channel.send(f"Error creating channel: {e}")
+async def handle_sethoneypot(message):
+    if not is_admin(message.author, message.guild):
+        await message.channel.send("You need administrator permissions.")
         return
-
-    if message.content.startswith('!honeypotconfig'):
-        if not is_admin(message.author, message.guild):
-            await message.channel.send("You need administrator permissions.")
+    parts = message.content.split()
+    if len(parts) < 2:
+        await message.channel.send("Usage: `!sethoneypot <channel_id>`")
+        return
+    try:
+        channel_id = int(parts[1])
+        channel = message.guild.get_channel(channel_id)
+        if not channel:
+            await message.channel.send("Channel not found.")
             return
-        honeypot = get_honeypot_channel(message.guild)
-        log = get_log_channel(message.guild)
-        embed = discord.Embed(title="Honeypot Configuration",
-                              color=0x7289da,
-                              timestamp=datetime.now(timezone.utc))
-        embed.add_field(name="Honeypot Channel",
-                        value=f"{honeypot.mention} (`{honeypot.id}`)"
-                        if honeypot else "Not set",
-                        inline=False)
-        embed.add_field(
-            name="Log Channel",
-            value=f"{log.mention} (`{log.id}`)" if log else "Not set",
-            inline=False)
         guild_config = get_guild_config(message.guild.id)
-        embed.add_field(name="Ban Reason",
-                        value=guild_config.get("ban_reason", "Not set"),
-                        inline=False)
-        embed.set_footer(text="Use !honeypothelp for commands")
-        await message.channel.send(embed=embed)
-        return
+        guild_config["honeypot_channel_id"] = channel_id
+        save_guild_config(message.guild.id, guild_config)
+        await message.channel.send(
+            f"Honeypot channel set to {channel.mention}")
+    except ValueError:
+        await message.channel.send("Invalid channel ID.")
 
-    if message.content.startswith('!honeypothelp'):
-        embed = discord.Embed(title="Honeypot Bot Commands", color=0x00ff00)
-        embed.add_field(name="!createhoneypot [name]",
-                        value="Create a new honeypot channel",
-                        inline=False)
-        embed.add_field(name="!createlog [name]",
-                        value="Create a new log channel",
-                        inline=False)
-        embed.add_field(name="!sethoneypot <channel_id>",
-                        value="Set existing channel as honeypot",
-                        inline=False)
-        embed.add_field(name="!setlog <channel_id>",
-                        value="Set existing channel as log",
-                        inline=False)
-        embed.add_field(name="!honeypotconfig",
-                        value="View current configuration",
-                        inline=False)
-        embed.add_field(name="!honeypotstats",
-                        value="View bot statistics",
-                        inline=False)
-        embed.set_footer(text="All commands require administrator permissions")
-        await message.channel.send(embed=embed)
+async def handle_setlog(message):
+    if not is_admin(message.author, message.guild):
+        await message.channel.send("You need administrator permissions.")
         return
-
-    if message.content.startswith('!honeypotstats'):
-        if not is_admin(message.author, message.guild):
-            await message.channel.send("You need administrator permissions.")
+    parts = message.content.split()
+    if len(parts) < 2:
+        await message.channel.send("Usage: `!setlog <channel_id>`")
+        return
+    try:
+        channel_id = int(parts[1])
+        channel = message.guild.get_channel(channel_id)
+        if not channel:
+            await message.channel.send("Channel not found.")
             return
-        honeypot = get_honeypot_channel(message.guild)
-        log = get_log_channel(message.guild)
-        embed = discord.Embed(title="Honeypot Statistics",
-                              color=0x7289da,
-                              timestamp=datetime.now(timezone.utc))
-        embed.add_field(name="Server", value=message.guild.name, inline=True)
-        embed.add_field(name="Honeypot Channel",
-                        value=honeypot.mention if honeypot else "Not set",
-                        inline=True)
-        embed.add_field(name="Log Channel",
-                        value=log.mention if log else "Not set",
-                        inline=True)
-        embed.add_field(name="Bot Latency",
-                        value=f"{round(client.latency * 1000)}ms",
-                        inline=True)
-        embed.add_field(name="Members",
-                        value=message.guild.member_count,
-                        inline=True)
-        status = "Active" if honeypot and log else "Setup needed"
-        embed.add_field(name="Status", value=status, inline=True)
-        embed.set_footer(text="Honeypot Protection System")
-        await message.channel.send(embed=embed)
+        guild_config = get_guild_config(message.guild.id)
+        guild_config["log_channel_id"] = channel_id
+        save_guild_config(message.guild.id, guild_config)
+        await message.channel.send(f"Log channel set to {channel.mention}")
+    except ValueError:
+        await message.channel.send("Invalid channel ID.")
+
+async def handle_createhoneypot(message):
+    if not is_admin(message.author, message.guild):
+        await message.channel.send("You need administrator permissions.")
         return
+    parts = message.content.split(maxsplit=1)
+    name = parts[1] if len(parts) > 1 else "🪤-honeypot"
+    try:
+        channel = await message.guild.create_text_channel(
+            name,
+            reason="Honeypot channel created by bot",
+            topic="This channel is monitored. Do not message here.")
+        guild_config = get_guild_config(message.guild.id)
+        guild_config["honeypot_channel_id"] = channel.id
+        save_guild_config(message.guild.id, guild_config)
+        await message.channel.send(
+            f"Created honeypot channel: {channel.mention}\nChannel ID: `{channel.id}`"
+        )
+    except Exception as e:
+        await message.channel.send(f"Error creating channel: {e}")
+
+async def handle_createlog(message):
+    if not is_admin(message.author, message.guild):
+        await message.channel.send("You need administrator permissions.")
+        return
+    parts = message.content.split(maxsplit=1)
+    name = parts[1] if len(parts) > 1 else "🔍-honeypot-logs"
+    try:
+        channel = await message.guild.create_text_channel(
+            name, reason="Log channel created by bot")
+        await channel.set_permissions(message.guild.default_role,
+                                      read_messages=False)
+        guild_config = get_guild_config(message.guild.id)
+        guild_config["log_channel_id"] = channel.id
+        save_guild_config(message.guild.id, guild_config)
+        await message.channel.send(
+            f"Created log channel: {channel.mention}\nChannel ID: `{channel.id}`"
+        )
+    except Exception as e:
+        await message.channel.send(f"Error creating channel: {e}")
+
+async def handle_honeypotconfig(message):
+    if not is_admin(message.author, message.guild):
+        await message.channel.send("You need administrator permissions.")
+        return
+    honeypot = get_honeypot_channel(message.guild)
+    log = get_log_channel(message.guild)
+    embed = discord.Embed(title="Honeypot Configuration",
+                          color=0x7289da,
+                          timestamp=datetime.now(timezone.utc))
+    embed.add_field(name="Honeypot Channel",
+                    value=f"{honeypot.mention} (`{honeypot.id}`)"
+                    if honeypot else "Not set",
+                    inline=False)
+    embed.add_field(
+        name="Log Channel",
+        value=f"{log.mention} (`{log.id}`)" if log else "Not set",
+        inline=False)
+    guild_config = get_guild_config(message.guild.id)
+    embed.add_field(name="Ban Reason",
+                    value=guild_config.get("ban_reason", "Not set"),
+                    inline=False)
+    embed.set_footer(text="Use !honeypothelp for commands")
+    await message.channel.send(embed=embed)
+
+async def handle_honeypothelp(message):
+    embed = discord.Embed(title="Honeypot Bot Commands", color=0x00ff00)
+    embed.add_field(name="!createhoneypot [name]",
+                    value="Create a new honeypot channel",
+                    inline=False)
+    embed.add_field(name="!createlog [name]",
+                    value="Create a new log channel",
+                    inline=False)
+    embed.add_field(name="!sethoneypot <channel_id>",
+                    value="Set existing channel as honeypot",
+                    inline=False)
+    embed.add_field(name="!setlog <channel_id>",
+                    value="Set existing channel as log",
+                    inline=False)
+    embed.add_field(name="!honeypotconfig",
+                    value="View current configuration",
+                    inline=False)
+    embed.add_field(name="!honeypotstats",
+                    value="View bot statistics",
+                    inline=False)
+    embed.set_footer(text="All commands require administrator permissions")
+    await message.channel.send(embed=embed)
+
+async def handle_honeypotstats(message):
+    if not is_admin(message.author, message.guild):
+        await message.channel.send("You need administrator permissions.")
+        return
+    honeypot = get_honeypot_channel(message.guild)
+    log = get_log_channel(message.guild)
+    embed = discord.Embed(title="Honeypot Statistics",
+                          color=0x7289da,
+                          timestamp=datetime.now(timezone.utc))
+    embed.add_field(name="Server", value=message.guild.name, inline=True)
+    embed.add_field(name="Honeypot Channel",
+                    value=honeypot.mention if honeypot else "Not set",
+                    inline=True)
+    embed.add_field(name="Log Channel",
+                    value=log.mention if log else "Not set",
+                    inline=True)
+    embed.add_field(name="Bot Latency",
+                    value=f"{round(client.latency * 1000)}ms",
+                    inline=True)
+    embed.add_field(name="Members",
+                    value=message.guild.member_count,
+                    inline=True)
+    status = "Active" if honeypot and log else "Setup needed"
+    embed.add_field(name="Status", value=status, inline=True)
+    embed.set_footer(text="Honeypot Protection System")
+    await message.channel.send(embed=embed)
 
 
 from keep_alive import keep_alive
