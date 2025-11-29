@@ -120,20 +120,17 @@ async def on_ready():
     print(f'{client.user} is now online!')
     activity = discord.Activity(
         type=discord.ActivityType.watching,
-        name=
-        "Use !honeypothelp for setup guide. Developed and maintained by @anthropical. Officially authorized for use exclusively on Kotuh’s server."
+        name="Use !honeypothelp for setup guide. Developed and maintained by @anthropical. Officially authorized for use exclusively on Kotuh's server."
     )
     await client.change_presence(activity=activity)
 
     for guild in client.guilds:
-        guild_config = get_guild_config(guild.id)
+        guild_config = await get_guild_config(guild.id)
         honeypot_id = guild_config.get("honeypot_channel_id")
         log_id = guild_config.get("log_channel_id")
 
         status = "✅" if honeypot_id and log_id else "⚠️"
-        print(
-            f"{status} {guild.name} (ID: {guild.id}) - Honeypot: {honeypot_id}, Log: {log_id}"
-        )
+        print(f"{status} {guild.name} (ID: {guild.id}) - Honeypot: {honeypot_id}, Log: {log_id}")
 
 
 def analyze_username(username):
@@ -183,12 +180,9 @@ def detect_suspicious_indicators(user, member):
 
 async def ban_user(member, indicators, guild):
     try:
-        guild_config = get_guild_config(guild.id)
-        ban_reason = guild_config.get(
-            "ban_reason", "Automatic ban: Suspected compromised account/bot")
-        await member.ban(reason=ban_reason +
-                         f" | Indicators: {', '.join(indicators)}",
-                         delete_message_days=1)
+        guild_config = await get_guild_config(guild.id)
+        ban_reason = guild_config.get("ban_reason", "Automatic ban: Suspected compromised account/bot")
+        await member.ban(reason=ban_reason + f" | Indicators: {', '.join(indicators)}", delete_message_days=1)
         print(f"Successfully banned {member} (ID: {member.id})")
         return True
     except discord.Forbidden:
@@ -200,27 +194,16 @@ async def ban_user(member, indicators, guild):
 
 
 async def log_detection(guild, user, message_content, indicators):
-    log_channel = get_log_channel(guild)
+    log_channel = await get_log_channel(guild)
     if not log_channel:
         return
     try:
-        embed = discord.Embed(title="Honeypot Triggered",
-                              color=0xffa500,
-                              timestamp=datetime.now(timezone.utc))
-        embed.add_field(name="User",
-                        value=f"{user.mention}\n`{user}`\nID: `{user.id}`",
-                        inline=False)
-        truncated = message_content[:500] + "..." if len(
-            message_content) > 500 else message_content
-        embed.add_field(name="Message",
-                        value=f"```{truncated}```",
-                        inline=False)
-        embed.add_field(name="Account Created",
-                        value=f"<t:{int(user.created_at.timestamp())}:R>",
-                        inline=True)
-        embed.add_field(name="Indicators",
-                        value="\n".join(indicators) if indicators else "None",
-                        inline=True)
+        embed = discord.Embed(title="Honeypot Triggered", color=0xffa500, timestamp=datetime.now(timezone.utc))
+        embed.add_field(name="User", value=f"{user.mention}\n`{user}`\nID: `{user.id}`", inline=False)
+        truncated = message_content[:500] + "..." if len(message_content) > 500 else message_content
+        embed.add_field(name="Message", value=f"```{truncated}```", inline=False)
+        embed.add_field(name="Account Created", value=f"<t:{int(user.created_at.timestamp())}:R>", inline=True)
+        embed.add_field(name="Indicators", value="\n".join(indicators) if indicators else "None", inline=True)
         if user.avatar:
             embed.set_thumbnail(url=user.display_avatar.url)
         await log_channel.send(embed=embed)
@@ -229,30 +212,20 @@ async def log_detection(guild, user, message_content, indicators):
 
 
 async def log_ban_result(guild, user, success, indicators):
-    log_channel = get_log_channel(guild)
+    log_channel = await get_log_channel(guild)
     if not log_channel:
         return
     try:
         color = 0x00ff00 if success else 0xff0000
         title = "User Banned" if success else "Ban Failed"
-        embed = discord.Embed(title=title,
-                              color=color,
-                              timestamp=datetime.now(timezone.utc))
-        embed.add_field(name="User",
-                        value=f"{user.mention}\n`{user}`",
-                        inline=False)
+        embed = discord.Embed(title=title, color=color, timestamp=datetime.now(timezone.utc))
+        embed.add_field(name="User", value=f"{user.mention}\n`{user}`", inline=False)
         embed.add_field(name="User ID", value=f"`{user.id}`", inline=True)
-        embed.add_field(name="Indicators",
-                        value=f"{len(indicators)}",
-                        inline=True)
+        embed.add_field(name="Indicators", value=f"{len(indicators)}", inline=True)
         if indicators:
-            embed.add_field(name="Details",
-                            value="• " + "\n• ".join(indicators),
-                            inline=False)
+            embed.add_field(name="Details", value="• " + "\n• ".join(indicators), inline=False)
         if not success:
-            embed.add_field(name="Note",
-                            value="Check bot permissions.",
-                            inline=False)
+            embed.add_field(name="Note", value="Check bot permissions.", inline=False)
         embed.set_footer(text="Honeypot Protection")
         await log_channel.send(embed=embed)
     except Exception as e:
@@ -265,17 +238,13 @@ async def handle_honeypot_trigger(message):
         if not member:
             return
         indicators = detect_suspicious_indicators(message.author, member)
-        print(
-            f"Honeypot triggered by {message.author} (ID: {message.author.id})"
-        )
+        print(f"Honeypot triggered by {message.author} (ID: {message.author.id})")
         print(f"Message: {message.content}")
         print(f"Indicators: {indicators}")
         await message.delete()
-        await log_detection(message.guild, message.author, message.content,
-                            indicators)
+        await log_detection(message.guild, message.author, message.content, indicators)
         ban_success = await ban_user(member, indicators, message.guild)
-        await log_ban_result(message.guild, message.author, ban_success,
-                             indicators)
+        await log_ban_result(message.guild, message.author, ban_success, indicators)
     except Exception as e:
         print(f"Error processing honeypot: {e}")
 
@@ -293,12 +262,11 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    honeypot_channel = get_honeypot_channel(message.guild)
+    honeypot_channel = await get_honeypot_channel(message.guild)
     if honeypot_channel and message.channel.id == honeypot_channel.id:
         await handle_honeypot_trigger(message)
         return
-
-    # Command dispatcher
+    
     commands = {
         '!sethoneypot': handle_sethoneypot,
         '!setlog': handle_setlog,
@@ -330,11 +298,9 @@ async def handle_sethoneypot(message):
         if not channel:
             await message.channel.send("Channel not found.")
             return
-        guild_config = get_guild_config(message.guild.id)
-        guild_config["honeypot_channel_id"] = channel_id
-        save_guild_config(message.guild.id, guild_config)
-        await message.channel.send(
-            f"Honeypot channel set to {channel.mention}")
+        # Use await for async function
+        await save_guild_config(message.guild.id, honeypot_channel_id=channel_id)
+        await message.channel.send(f"Honeypot channel set to {channel.mention}")
     except ValueError:
         await message.channel.send("Invalid channel ID.")
 
@@ -352,9 +318,8 @@ async def handle_setlog(message):
         if not channel:
             await message.channel.send("Channel not found.")
             return
-        guild_config = get_guild_config(message.guild.id)
-        guild_config["log_channel_id"] = channel_id
-        save_guild_config(message.guild.id, guild_config)
+        # Use await for async function
+        await save_guild_config(message.guild.id, log_channel_id=channel_id)
         await message.channel.send(f"Log channel set to {channel.mention}")
     except ValueError:
         await message.channel.send("Invalid channel ID.")
@@ -370,9 +335,8 @@ async def handle_createhoneypot(message):
             name,
             reason="Honeypot channel created by bot",
             topic="This channel is monitored. Do not message here.")
-        guild_config = get_guild_config(message.guild.id)
-        guild_config["honeypot_channel_id"] = channel.id
-        save_guild_config(message.guild.id, guild_config)
+        # Use await for async function
+        await save_guild_config(message.guild.id, honeypot_channel_id=channel.id)
         await message.channel.send(
             f"Created honeypot channel: {channel.mention}\nChannel ID: `{channel.id}`"
         )
@@ -388,11 +352,9 @@ async def handle_createlog(message):
     try:
         channel = await message.guild.create_text_channel(
             name, reason="Log channel created by bot")
-        await channel.set_permissions(message.guild.default_role,
-                                      read_messages=False)
-        guild_config = get_guild_config(message.guild.id)
-        guild_config["log_channel_id"] = channel.id
-        save_guild_config(message.guild.id, guild_config)
+        await channel.set_permissions(message.guild.default_role, read_messages=False)
+        # Use await for async function
+        await save_guild_config(message.guild.id, log_channel_id=channel.id)
         await message.channel.send(
             f"Created log channel: {channel.mention}\nChannel ID: `{channel.id}`"
         )
@@ -403,58 +365,33 @@ async def handle_honeypotconfig(message):
     if not is_admin(message.author, message.guild):
         await message.channel.send("You need administrator permissions.")
         return
-    honeypot = get_honeypot_channel(message.guild)
-    log = get_log_channel(message.guild)
-    embed = discord.Embed(title="Honeypot Configuration",
-                          color=0x7289da,
-                          timestamp=datetime.now(timezone.utc))
+    # Use await for async functions
+    honeypot = await get_honeypot_channel(message.guild)
+    log = await get_log_channel(message.guild)
+    guild_config = await get_guild_config(message.guild.id)
+    
+    embed = discord.Embed(title="Honeypot Configuration", color=0x7289da, timestamp=datetime.now(timezone.utc))
     embed.add_field(name="Honeypot Channel",
-                    value=f"{honeypot.mention} (`{honeypot.id}`)"
-                    if honeypot else "Not set",
+                    value=f"{honeypot.mention} (`{honeypot.id}`)" if honeypot else "Not set",
                     inline=False)
-    embed.add_field(
-        name="Log Channel",
-        value=f"{log.mention} (`{log.id}`)" if log else "Not set",
-        inline=False)
-    guild_config = get_guild_config(message.guild.id)
+    embed.add_field(name="Log Channel",
+                    value=f"{log.mention} (`{log.id}`)" if log else "Not set",
+                    inline=False)
     embed.add_field(name="Ban Reason",
                     value=guild_config.get("ban_reason", "Not set"),
                     inline=False)
     embed.set_footer(text="Use !honeypothelp for commands")
     await message.channel.send(embed=embed)
 
-async def handle_honeypothelp(message):
-    embed = discord.Embed(title="Honeypot Bot Commands", color=0x00ff00)
-    embed.add_field(name="!createhoneypot [name]",
-                    value="Create a new honeypot channel",
-                    inline=False)
-    embed.add_field(name="!createlog [name]",
-                    value="Create a new log channel",
-                    inline=False)
-    embed.add_field(name="!sethoneypot <channel_id>",
-                    value="Set existing channel as honeypot",
-                    inline=False)
-    embed.add_field(name="!setlog <channel_id>",
-                    value="Set existing channel as log",
-                    inline=False)
-    embed.add_field(name="!honeypotconfig",
-                    value="View current configuration",
-                    inline=False)
-    embed.add_field(name="!honeypotstats",
-                    value="View bot statistics",
-                    inline=False)
-    embed.set_footer(text="All commands require administrator permissions")
-    await message.channel.send(embed=embed)
-
 async def handle_honeypotstats(message):
     if not is_admin(message.author, message.guild):
         await message.channel.send("You need administrator permissions.")
         return
-    honeypot = get_honeypot_channel(message.guild)
-    log = get_log_channel(message.guild)
-    embed = discord.Embed(title="Honeypot Statistics",
-                          color=0x7289da,
-                          timestamp=datetime.now(timezone.utc))
+    # Use await for async functions
+    honeypot = await get_honeypot_channel(message.guild)
+    log = await get_log_channel(message.guild)
+    
+    embed = discord.Embed(title="Honeypot Statistics", color=0x7289da, timestamp=datetime.now(timezone.utc))
     embed.add_field(name="Server", value=message.guild.name, inline=True)
     embed.add_field(name="Honeypot Channel",
                     value=honeypot.mention if honeypot else "Not set",
@@ -462,12 +399,8 @@ async def handle_honeypotstats(message):
     embed.add_field(name="Log Channel",
                     value=log.mention if log else "Not set",
                     inline=True)
-    embed.add_field(name="Bot Latency",
-                    value=f"{round(client.latency * 1000)}ms",
-                    inline=True)
-    embed.add_field(name="Members",
-                    value=message.guild.member_count,
-                    inline=True)
+    embed.add_field(name="Bot Latency", value=f"{round(client.latency * 1000)}ms", inline=True)
+    embed.add_field(name="Members", value=message.guild.member_count, inline=True)
     status = "Active" if honeypot and log else "Setup needed"
     embed.add_field(name="Status", value=status, inline=True)
     embed.set_footer(text="Honeypot Protection System")
