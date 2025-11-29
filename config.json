@@ -1,0 +1,9 @@
+{
+    "guilds": {
+        "default": {
+            "honeypot_channel_id": null,
+            "log_channel_id": null,
+            "ban_reason": "Automatic ban: Suspected compromised account/bot"
+        }
+    }
+}
