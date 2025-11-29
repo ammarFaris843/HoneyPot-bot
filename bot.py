@@ -1,7 +1,16 @@
 import discord
 import os
 import json
+import asyncio
 from datetime import datetime, timedelta, timezone
+import asyncpg
+
+from keep_alive import keep_alive
+
+keep_alive()
+
+DATABASE_URL = os.getenv('DATABASE_URL')
+DISCORD_BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN')
 
 intents = discord.Intents.default()
 intents.messages = True
@@ -14,58 +23,82 @@ client = discord.Client(intents=intents)
 CONFIG_FILE = "src/config.json"
 BOT_OWNERS = {322362428883206145}
 
+# untested asyncpg functions for future use
+async def get_guild_config(guild_id):
+    conn = await asyncpg.connect(DATABASE_URL)
+    record = await conn.fetchrow("SELECT * FROM guilds WHERE guild_id=$1", guild_id)
+    if not record:
+        await conn.execute(
+            "INSERT INTO guilds(guild_id) VALUES($1)", guild_id
+        )
+        record = await conn.fetchrow("SELECT * FROM guilds WHERE guild_id=$1", guild_id)
+    await conn.close()
+    return dict(record)
 
-def load_config():
-    try:
-        with open(CONFIG_FILE, 'r') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {"guilds": {}}
+async def save_guild_config(guild_id, honeypot_channel_id=None, log_channel_id=None, ban_reason=None):
+    conn = await asyncpg.connect(DATABASE_URL)
+    await conn.execute("""
+        INSERT INTO guilds(guild_id, honeypot_channel_id, log_channel_id, ban_reason)
+        VALUES($1, $2, $3, $4)
+        ON CONFLICT (guild_id) DO UPDATE SET
+            honeypot_channel_id = EXCLUDED.honeypot_channel_id,
+            log_channel_id = EXCLUDED.log_channel_id,
+            ban_reason = EXCLUDED.ban_reason
+    """, guild_id, honeypot_channel_id, log_channel_id, ban_reason)
+    await conn.close()
 
-
-def save_config(config):
-    os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
-    with open(CONFIG_FILE, 'w') as f:
-        json.dump(config, f, indent=4)
-
-
-config = load_config()
-
-
-def get_guild_config(guild_id):
-    """Get configuration for a specific guild"""
-    if "guilds" not in config:
-        config["guilds"] = {}
-    if str(guild_id) not in config["guilds"]:
-        config["guilds"][str(guild_id)] = {
-            "honeypot_channel_id": None,
-            "log_channel_id": None,
-            "ban_reason": "Automatic ban: Suspected compromised account/bot"
-        }
-        save_config(config)
-    return config["guilds"][str(guild_id)]
-
-
-def save_guild_config(guild_id, guild_config):
-    """Save configuration for a specific guild"""
-    if "guilds" not in config:
-        config["guilds"] = {}
-    config["guilds"][str(guild_id)] = guild_config
-    save_config(config)
-
-
-def get_honeypot_channel(guild):
-    guild_config = get_guild_config(guild.id)
-    if guild_config.get("honeypot_channel_id"):
-        return guild.get_channel(guild_config["honeypot_channel_id"])
-    return None
-
-
-def get_log_channel(guild):
-    guild_config = get_guild_config(guild.id)
-    if guild_config.get("log_channel_id"):
-        return guild.get_channel(guild_config["log_channel_id"])
-    return None
+# static config use , integrated with asyncpg functions for future migration    (remove if cause errors)
+# def load_config():
+#     try:
+#         with open(CONFIG_FILE, 'r') as f:
+#             return json.load(f)
+#     except FileNotFoundError:
+#         return {"guilds": {}}
+#
+#
+# def save_config(config):
+#     os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
+#     with open(CONFIG_FILE, 'w') as f:
+#         json.dump(config, f, indent=4)
+#
+#
+# config = load_config()
+#
+#
+# def get_guild_config(guild_id):
+#     """Get configuration for a specific guild"""
+#     if "guilds" not in config:
+#         config["guilds"] = {}
+#     if str(guild_id) not in config["guilds"]:
+#         config["guilds"][str(guild_id)] = {
+#             "honeypot_channel_id": None,
+#             "log_channel_id": None,
+#             "ban_reason": "Automatic ban: Suspected compromised account/bot"
+#         }
+#         save_config(config)
+#     return config["guilds"][str(guild_id)]
+#
+#
+# def save_guild_config(guild_id, guild_config):
+#     """Save configuration for a specific guild"""
+#     if "guilds" not in config:
+#         config["guilds"] = {}
+#     config["guilds"][str(guild_id)] = guild_config
+#     save_config(config)
+#
+#
+# def get_honeypot_channel(guild):
+#     guild_config = get_guild_config(guild.id)
+#     if guild_config.get("honeypot_channel_id"):
+#         return guild.get_channel(guild_config["honeypot_channel_id"])
+#     return None
+#
+#
+# def get_log_channel(guild):
+#     guild_config = get_guild_config(guild.id)
+#     if guild_config.get("log_channel_id"):
+#         return guild.get_channel(guild_config["log_channel_id"])
+#     return None
 
 
 @client.event
